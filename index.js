@@ -65,7 +65,7 @@ function limitarTrecho(texto, limite = 180) {
   return `${textoLimpo.slice(0, limite).trim()}...`;
 }
 
-async function buscarConteudoAleatorioTabNews() {
+async function buscarConteudoAleatorioTabNews(logger = console.error) {
   metricasTabNews.chamadasBuscarConteudo += 1;
 
   const page = Math.floor(Math.random() * 20) + 1;
@@ -77,7 +77,7 @@ async function buscarConteudoAleatorioTabNews() {
 
   metricasTabNews.chamadasApiLista += 1;
 
-  console.error(
+  logger(
     `[TabNews] buscarConteudoAleatorioTabNews chamada ` +
       `#${metricasTabNews.chamadasBuscarConteudo}; ` +
       `API lista #${metricasTabNews.chamadasApiLista}; ` +
@@ -90,7 +90,7 @@ async function buscarConteudoAleatorioTabNews() {
     },
   });
 
-  console.error(
+  logger(
     `[TabNews] API lista respondeu: ` +
       `${response.status} ${response.statusText}`
   );
@@ -119,15 +119,15 @@ async function buscarConteudoAleatorioTabNews() {
  * Captura um artigo aleatorio do TabNews com um trecho
  * de seu conteudo.
  */
-async function buscarArtigoAleatorioTabNews() {
+async function buscarArtigoAleatorioTabNews(logger = console.error) {
   metricasTabNews.chamadasBuscarArtigo += 1;
 
-  console.error(
+  logger(
     `[TabNews] buscarArtigoAleatorioTabNews chamada ` +
       `#${metricasTabNews.chamadasBuscarArtigo}`
   );
 
-  const content = await buscarConteudoAleatorioTabNews();
+  const content = await buscarConteudoAleatorioTabNews(logger);
 
   const url = articleUrl(content);
   let body = content.body;
@@ -139,7 +139,7 @@ async function buscarArtigoAleatorioTabNews() {
 
     metricasTabNews.chamadasApiDetalhe += 1;
 
-    console.error(
+    logger(
       `[TabNews] API detalhe #${metricasTabNews.chamadasApiDetalhe}; ` +
         `endpoint=${detalheEndpoint}`
     );
@@ -150,7 +150,7 @@ async function buscarArtigoAleatorioTabNews() {
       },
     });
 
-    console.error(
+    logger(
       `[TabNews] API detalhe respondeu: ` +
         `${detalheResponse.status} ${detalheResponse.statusText}`
     );
@@ -160,7 +160,7 @@ async function buscarArtigoAleatorioTabNews() {
       body = detalhe.body;
     }
   } else {
-    console.error(
+    logger(
       '[TabNews] Conteudo da lista ja possui body; API detalhe nao chamada.'
     );
   }
@@ -197,12 +197,12 @@ async function listarComponentes() {
  * Envia um componente para a API e captura
  * posteriormente sua resposta.
  */
-async function enviarComponente(componente) {
+async function enviarComponente(componente, logger = console.error) {
   const respostaEsperada =
     `Acessibilidade componente ${componente}`;
 
   const artigoTabNews =
-    await buscarArtigoAleatorioTabNews();
+    await buscarArtigoAleatorioTabNews(logger);
 
   const respostaComArtigo =
     `${respostaEsperada} + ${artigoTabNews.trecho}`;
@@ -218,6 +218,10 @@ async function enviarComponente(componente) {
    */
   const postEndpoint =
     'https://postman-echo.com/post';
+
+  logger(
+    `[Componente:${componente}] POST ${postEndpoint}`
+  );
 
   const postResponse = await fetch(postEndpoint, {
     method: 'POST',
@@ -237,6 +241,11 @@ async function enviarComponente(componente) {
     );
   }
 
+  logger(
+    `[Componente:${componente}] POST respondeu: ` +
+      `${postResponse.status} ${postResponse.statusText}`
+  );
+
   /**
    * GET
    *
@@ -245,6 +254,10 @@ async function enviarComponente(componente) {
   const getEndpoint =
     `https://postman-echo.com/get?resposta=` +
     encodeURIComponent(respostaComArtigo);
+
+  logger(
+    `[Componente:${componente}] GET ${getEndpoint}`
+  );
 
   const getResponse = await fetch(getEndpoint, {
     method: 'GET',
@@ -260,6 +273,11 @@ async function enviarComponente(componente) {
       `${getResponse.status} ${getResponse.statusText}`
     );
   }
+
+  logger(
+    `[Componente:${componente}] GET respondeu: ` +
+      `${getResponse.status} ${getResponse.statusText}`
+  );
 
   const data = await getResponse.json();
 
@@ -328,6 +346,14 @@ async function processarFluxoComponentes(
   componentesInput
 ) {
   let componentes;
+  const logs = [];
+  const logger = (message) => {
+    const line =
+      `[${new Date().toISOString()}] ${message}`;
+
+    logs.push(line);
+    console.error(line);
+  };
 
   /**
    * Permite reutilizar a função passando componentes
@@ -347,7 +373,7 @@ async function processarFluxoComponentes(
     componentes = await listarComponentes();
   }
 
-  console.error(
+  logger(
     `Componentes identificados: ${componentes.join(', ')}`
   );
 
@@ -356,14 +382,14 @@ async function processarFluxoComponentes(
    */
   const resultados = await Promise.all(
     componentes.map(async (componente) => {
-      console.error(
+      logger(
         `Processando componente: ${componente}`
       );
 
       const resultado =
-        await enviarComponente(componente);
+        await enviarComponente(componente, logger);
 
-      console.error(
+      logger(
         `Componente processado: ${componente}`
       );
 
@@ -382,6 +408,7 @@ async function processarFluxoComponentes(
     componentes,
     resultados,
     promptPronto,
+    logs,
   };
 }
 
@@ -536,6 +563,9 @@ const handle = serveStdio(() => {
         componentes: z.array(
           z.string()
         ),
+        logs: z.array(
+          z.string()
+        ),
 
         promptPronto: z.string(),
 
@@ -584,6 +614,7 @@ const handle = serveStdio(() => {
         componentes,
         resultados,
         promptPronto,
+        logs,
       } =
         await processarFluxoComponentes();
 
@@ -614,6 +645,7 @@ const handle = serveStdio(() => {
 
         structuredContent: {
           componentes,
+          logs,
           promptPronto,
           resultados,
         },
@@ -753,6 +785,11 @@ const handle = serveStdio(() => {
         promptPronto:
           z.string(),
 
+        logs:
+          z.array(
+            z.string()
+          ),
+
         resultados:
           z.array(
             z.object({
@@ -799,6 +836,7 @@ const handle = serveStdio(() => {
       const {
         resultados,
         promptPronto,
+        logs,
       } =
         await processarFluxoComponentes(
           componentesInput
@@ -813,6 +851,7 @@ const handle = serveStdio(() => {
         ],
 
         structuredContent: {
+          logs,
           promptPronto,
           resultados,
         },
