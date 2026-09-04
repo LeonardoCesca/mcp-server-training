@@ -185,6 +185,31 @@ Instale as dependencias:
 npm install
 ```
 
+## Configurar no VS Code
+
+Este projeto inclui um script simples para instalar as dependencias e criar a
+configuracao MCP de workspace em `.vscode/mcp.json`.
+
+Execute:
+
+```bash
+bash setup-vscode-mcp.sh
+```
+
+Depois, no VS Code:
+
+1. Abra este projeto como workspace.
+2. Abra a Command Palette.
+3. Execute `MCP: List Servers`.
+4. Inicie o servidor `servidorSaudacao`.
+5. No chat/agent mode, chame a tool `tool_a_componentes`.
+
+O arquivo gerado usa o transporte `stdio` e executa:
+
+```text
+node ${workspaceFolder}/index.js
+```
+
 Inicie o servidor MCP via stdio:
 
 ```bash
