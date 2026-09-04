@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "servidorSaudacao": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/index.js"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
