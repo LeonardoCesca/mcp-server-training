@@ -14,6 +14,29 @@ function articleUrl(content) {
   return `https://www.tabnews.com.br/${content.owner_username}/${content.slug}`;
 }
 
+async function buscarConteudoAleatorioTabNews() {
+  const page = Math.floor(Math.random() * 20) + 1;
+  const perPage = 30;
+  const endpoint = `https://www.tabnews.com.br/api/v1/contents?strategy=new&page=${page}&per_page=${perPage}`;
+  const response = await fetch(endpoint, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Falha ao consultar TabNews: ${response.status} ${response.statusText}`);
+  }
+
+  const contents = await response.json();
+
+  if (!Array.isArray(contents) || contents.length === 0) {
+    throw new Error('Falha ao consultar TabNews: nenhum conteudo encontrado.');
+  }
+
+  return contents[Math.floor(Math.random() * contents.length)];
+}
+
 async function listarComponentes() {
   return ['header', 'body', 'html', 'css'];
 }
@@ -80,6 +103,18 @@ function montarPromptPronto(resultados) {
   return `PROMPT PRONTO = ${resultados.map((resultado) => resultado.respostaCapturada).join('\n')}`;
 }
 
+async function processarFluxoComponentes(componentesInput) {
+  const componentes = componentesInput?.map((item) => item.componente) ?? (await listarComponentes());
+  const resultados = await Promise.all(componentes.map((componente) => enviarComponente(componente)));
+  const promptPronto = montarPromptPronto(resultados);
+
+  return {
+    componentes,
+    resultados,
+    promptPronto,
+  };
+}
+
 const handle = serveStdio(() => {
   const server = new McpServer({
     name: 'servidor-saudacao',
@@ -87,44 +122,6 @@ const handle = serveStdio(() => {
     version: '1.2.0',
     description: 'Servidor MCP simples com saudacao, consulta ao TabNews e fluxo entre ferramentas.',
   });
-
-  server.registerTool(
-    'saudacao',
-    {
-      title: 'Saudacao Amistosa',
-      description: 'Retorna uma saudacao calorosa com a data, hora e fuso horario atuais.',
-      inputSchema: z.object({
-        nome: z.string().trim().min(1).optional().describe('Nome da pessoa a cumprimentar.'),
-      }),
-      outputSchema: z.object({
-        mensagem: z.string(),
-        dataHoraIso: z.string(),
-        fusoHorario: z.string(),
-      }),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async ({ nome }) => {
-      const agora = new Date();
-      const fusoHorario = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const destinatario = nome ? `, ${nome}` : '';
-
-      const output = {
-        mensagem: `Ola${destinatario}! Que bom te ver por aqui. Agora e ${formatDateTime(agora)}. Espero que seu dia esteja leve e produtivo!`,
-        dataHoraIso: agora.toISOString(),
-        fusoHorario,
-      };
-
-      return {
-        content: [{ type: 'text', text: output.mensagem }],
-        structuredContent: output,
-      };
-    },
-  );
 
   server.registerTool(
     'artigos_tabnews',
@@ -185,7 +182,7 @@ const handle = serveStdio(() => {
     {
       title: 'Tool A - Componentes',
       description:
-        'Retorna um contrato com a lista de componentes e instrui que cada item deve ser enviado para tool_b_enviar_componente. Para executar tudo em uma chamada, use processar_componentes.',
+        'Lista componentes e orienta a proxima etapa. Nao retorna o prompt final; use processar_componentes para obter promptPronto.',
       inputSchema: z.object({}),
       outputSchema: z.object({
         componentes: z.array(z.string()),
@@ -193,26 +190,55 @@ const handle = serveStdio(() => {
         modoChamada: z.literal('uma_chamada_por_componente'),
         parametroDestino: z.literal('componente'),
         fluxoCompletoTool: z.literal('processar_componentes'),
+        rascunhoPromptNaoFinal: z.string(),
+        instrucaoContinuacao: z.string(),
+        conteudoTabNews: z.object({}).passthrough(),
+        resultados: z.array(
+          z.object({
+            componente: z.string(),
+            postEndpoint: z.string().url(),
+            getEndpoint: z.string().url(),
+            bodyEnviado: z.object({
+              componente: z.string(),
+            }),
+            respostaCapturada: z.string(),
+          }),
+        ),
       }),
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
-        openWorldHint: false,
+        openWorldHint: true,
       },
     },
     async () => {
-      const componentes = await listarComponentes();
+      console.error('Aguardando...');
+      const [fluxo, conteudoTabNews] = await Promise.all([
+        processarFluxoComponentes(),
+        buscarConteudoAleatorioTabNews(),
+      ]);
+      const { componentes, resultados, promptPronto } = fluxo;
       const contrato = contratoComponentes(componentes);
+      const instrucaoContinuacao =
+        'Nao finalize com este retorno. Chame processar_componentes para obter o campo promptPronto final.';
+      const output = {
+        ...contrato,
+        rascunhoPromptNaoFinal: promptPronto,
+        instrucaoContinuacao,
+        conteudoTabNews,
+        resultados,
+      };
+      const text = `RASCUNHO NAO FINAL = ${promptPronto}\n\nPROXIMA ACAO = ${instrucaoContinuacao}\n\nOBJETO TABNEWS = ${JSON.stringify(conteudoTabNews)}`;
 
       return {
         content: [
           {
             type: 'text',
-            text: `Componentes: ${componentes.join(', ')}. Proxima tool: ${contrato.proximaTool} (${contrato.modoChamada}).`,
+            text,
           },
         ],
-        structuredContent: contrato,
+        structuredContent: output,
       };
     },
   );
@@ -293,9 +319,7 @@ const handle = serveStdio(() => {
     },
     async ({ componentes: componentesInput }) => {
       console.error('Aguardando...');
-      const componentes = componentesInput?.map((item) => item.componente) ?? (await listarComponentes());
-      const resultados = await Promise.all(componentes.map((componente) => enviarComponente(componente)));
-      const promptPronto = montarPromptPronto(resultados);
+      const { resultados, promptPronto } = await processarFluxoComponentes(componentesInput);
 
       return {
         content: [
