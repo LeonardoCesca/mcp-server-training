@@ -27,13 +27,13 @@ processarFluxoComponentes()
 enviarComponente(header/body/html/css)
       |
       v
-montarPromptPronto()
+montarResultadosMarkdown()
       |
       v
-promptPronto
+Markdown final
 ```
 
-Ou seja: `tool_a_componentes` nao retorna uma instrucao para o LLM chamar outra tool depois. Ela chama uma funcao interna do proprio servidor (`processarFluxoComponentes`) e devolve o `promptPronto` final.
+Ou seja: `tool_a_componentes` nao retorna uma instrucao para o LLM chamar outra tool depois. Ela chama uma funcao interna do proprio servidor (`processarFluxoComponentes`) e devolve Markdown como saida final.
 
 ## Por que nao fazer tool chamando tool?
 
@@ -90,12 +90,11 @@ header, body, html, css
 - simula um `GET` para capturar a resposta final;
 - retorna os dados estruturados daquele componente.
 
-5. Quando todos os componentes terminam, `montarPromptPronto()` junta as respostas em um unico texto final.
+5. Quando todos os componentes terminam, o servidor monta a resposta final em Markdown.
 
 6. A tool `tool_a_componentes` retorna:
 
-- `content`: texto final para exibicao;
-- `structuredContent`: objeto com `componentes`, `logs`, `promptPronto` e `resultados`.
+- `content`: Markdown final para exibicao.
 
 ## Tools disponiveis
 
@@ -103,7 +102,7 @@ header, body, html, css
 
 Tool principal do fluxo.
 
-Ela nao recebe parametros. Ao ser chamada, identifica os componentes, processa todos eles e retorna o `promptPronto`.
+Ela nao recebe parametros. Ao ser chamada, identifica os componentes, processa todos eles e retorna Markdown.
 
 Uso esperado:
 
@@ -113,13 +112,10 @@ chamar tool_a_componentes
 
 Resposta resumida:
 
-```json
-{
-  "componentes": ["header", "body", "html", "css"],
-  "promptPronto": "PROMPT PRONTO = ...",
-  "logs": ["..."],
-  "resultados": ["..."]
-}
+```md
+## Titulo da noticia capturada no TabNews
+
+Trecho capturado para o componente...
 ```
 
 ### `tool_b_enviar_componente`
@@ -226,11 +222,22 @@ npm run inspect
 
 Ao chamar `tool_a_componentes`, o retorno final deve conter algo neste formato:
 
-```text
-PROMPT PRONTO = Acessibilidade componente header + ...
-Acessibilidade componente body + ...
-Acessibilidade componente html + ...
-Acessibilidade componente css + ...
+```md
+## Titulo da noticia capturada para header
+
+...
+
+## Titulo da noticia capturada para body
+
+...
+
+## Titulo da noticia capturada para html
+
+...
+
+## Titulo da noticia capturada para css
+
+...
 ```
 
 Esse resultado ja e final. O host MCP nao precisa chamar outra tool para concluir o fluxo.

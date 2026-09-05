@@ -3,6 +3,12 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 
 /**
+ * ============================================================
+ * UTILITÁRIOS
+ * ============================================================
+ */
+
+/**
  * Formata data/hora.
  */
 function formatDateTime(date) {
@@ -20,11 +26,112 @@ function articleUrl(content) {
   return `https://www.tabnews.com.br/${content.owner_username}/${content.slug}`;
 }
 
-const artigoTabNewsOutputSchema = z.object({
-  titulo: z.string(),
-  url: z.string().url(),
-  trecho: z.string(),
-});
+/**
+ * ============================================================
+ * SCHEMAS
+ * ============================================================
+ */
+
+const artigoTabNewsOutputSchema = z
+  .object({
+    titulo: z.string(),
+    url: z.string().url(),
+    trecho: z.string(),
+  })
+  .strict();
+
+const componenteResultadoOutputSchema = z
+  .object({
+    componente: z.string(),
+
+    postEndpoint: z.string().url(),
+
+    getEndpoint: z.string().url(),
+
+    bodyEnviado: z
+      .object({
+        componente: z.string(),
+      })
+      .strict(),
+
+    artigoTabNews: artigoTabNewsOutputSchema,
+
+    respostaCapturada: z.string(),
+  })
+  .strict();
+
+/**
+ * Estrutura usada na resposta final da Tool A.
+ */
+const resultadoEstruturadoOutputSchema = z
+  .object({
+    TITULO: z.string(),
+
+    CONTENT: z.string(),
+  })
+  .strict();
+
+/**
+ * Contrato canônico da Tool A.
+ *
+ * data:
+ *   Estrutura para consumo por máquina/LLM/outras integrações.
+ *
+ * display:
+ *   Conteúdo final pronto para ser apresentado ao usuário.
+ *
+ * A LLM não deve reconstruir a resposta usando "data".
+ * Para apresentação visual deve utilizar "display".
+ */
+const toolAComponentesOutputSchema = z
+  .object({
+    tipo: z.literal('tool_a_componentes_resultado'),
+
+    versaoTemplate: z.literal('2.0'),
+
+    status: z.enum([
+      'sucesso',
+      'erro',
+    ]),
+
+    data: z
+      .object({
+        componentes: z.array(
+          z.string()
+        ),
+
+        resultados: z.array(
+          resultadoEstruturadoOutputSchema
+        ),
+      })
+      .strict(),
+
+    display: z.string(),
+  })
+  .strict();
+
+/**
+ * Contrato da tool processar_componentes.
+ */
+const processarComponentesOutputSchema = z
+  .object({
+    promptPronto: z.string(),
+
+    logs: z.array(
+      z.string()
+    ),
+
+    resultados: z.array(
+      componenteResultadoOutputSchema
+    ),
+  })
+  .strict();
+
+/**
+ * ============================================================
+ * MÉTRICAS
+ * ============================================================
+ */
 
 const metricasTabNews = {
   chamadasBuscarConteudo: 0,
@@ -34,10 +141,13 @@ const metricasTabNews = {
 };
 
 /**
- * Busca um conteúdo aleatório do TabNews.
+ * ============================================================
+ * TABNEWS
+ * ============================================================
  */
+
 /**
- * Remove marcacoes comuns de Markdown/HTML para gerar
+ * Remove marcações comuns de Markdown/HTML para gerar
  * um trecho simples de texto.
  */
 function limparTexto(texto) {
@@ -65,10 +175,17 @@ function limitarTrecho(texto, limite = 180) {
   return `${textoLimpo.slice(0, limite).trim()}...`;
 }
 
-async function buscarConteudoAleatorioTabNews(logger = console.error) {
+/**
+ * Busca um conteúdo aleatório do TabNews.
+ */
+async function buscarConteudoAleatorioTabNews(
+  logger = console.error
+) {
   metricasTabNews.chamadasBuscarConteudo += 1;
 
-  const page = Math.floor(Math.random() * 20) + 1;
+  const page =
+    Math.floor(Math.random() * 20) + 1;
+
   const perPage = 30;
 
   const endpoint =
@@ -98,28 +215,35 @@ async function buscarConteudoAleatorioTabNews(logger = console.error) {
   if (!response.ok) {
     throw new Error(
       `Falha ao consultar TabNews: ` +
-      `${response.status} ${response.statusText}`
+        `${response.status} ${response.statusText}`
     );
   }
 
   const contents = await response.json();
 
-  if (!Array.isArray(contents) || contents.length === 0) {
+  if (
+    !Array.isArray(contents) ||
+    contents.length === 0
+  ) {
     throw new Error(
       'Falha ao consultar TabNews: nenhum conteudo encontrado.'
     );
   }
 
   return contents[
-    Math.floor(Math.random() * contents.length)
+    Math.floor(
+      Math.random() * contents.length
+    )
   ];
 }
 
 /**
- * Captura um artigo aleatorio do TabNews com um trecho
- * de seu conteudo.
+ * Captura um artigo aleatório do TabNews com um trecho
+ * de seu conteúdo.
  */
-async function buscarArtigoAleatorioTabNews(logger = console.error) {
+async function buscarArtigoAleatorioTabNews(
+  logger = console.error
+) {
   metricasTabNews.chamadasBuscarArtigo += 1;
 
   logger(
@@ -127,11 +251,21 @@ async function buscarArtigoAleatorioTabNews(logger = console.error) {
       `#${metricasTabNews.chamadasBuscarArtigo}`
   );
 
-  const content = await buscarConteudoAleatorioTabNews(logger);
+  const content =
+    await buscarConteudoAleatorioTabNews(
+      logger
+    );
 
-  const url = articleUrl(content);
-  let body = content.body;
+  const url =
+    articleUrl(content);
 
+  let body =
+    content.body;
+
+  /**
+   * Caso a listagem não tenha retornado body,
+   * busca o detalhe do conteúdo.
+   */
   if (!body) {
     const detalheEndpoint =
       `https://www.tabnews.com.br/api/v1/contents/` +
@@ -140,28 +274,35 @@ async function buscarArtigoAleatorioTabNews(logger = console.error) {
     metricasTabNews.chamadasApiDetalhe += 1;
 
     logger(
-      `[TabNews] API detalhe #${metricasTabNews.chamadasApiDetalhe}; ` +
+      `[TabNews] API detalhe ` +
+        `#${metricasTabNews.chamadasApiDetalhe}; ` +
         `endpoint=${detalheEndpoint}`
     );
 
-    const detalheResponse = await fetch(detalheEndpoint, {
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+    const detalheResponse =
+      await fetch(detalheEndpoint, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
     logger(
       `[TabNews] API detalhe respondeu: ` +
-        `${detalheResponse.status} ${detalheResponse.statusText}`
+        `${detalheResponse.status} ` +
+        `${detalheResponse.statusText}`
     );
 
     if (detalheResponse.ok) {
-      const detalhe = await detalheResponse.json();
-      body = detalhe.body;
+      const detalhe =
+        await detalheResponse.json();
+
+      body =
+        detalhe.body;
     }
   } else {
     logger(
-      '[TabNews] Conteudo da lista ja possui body; API detalhe nao chamada.'
+      '[TabNews] Conteudo da lista ja possui body; ' +
+        'API detalhe nao chamada.'
     );
   }
 
@@ -171,11 +312,20 @@ async function buscarArtigoAleatorioTabNews(logger = console.error) {
     'Trecho indisponivel.';
 
   return {
-    titulo: content.title,
+    titulo:
+      content.title,
+
     url,
+
     trecho,
   };
 }
+
+/**
+ * ============================================================
+ * COMPONENTES
+ * ============================================================
+ */
 
 /**
  * Lista os componentes que devem ser processados.
@@ -197,12 +347,17 @@ async function listarComponentes() {
  * Envia um componente para a API e captura
  * posteriormente sua resposta.
  */
-async function enviarComponente(componente, logger = console.error) {
+async function enviarComponente(
+  componente,
+  logger = console.error
+) {
   const respostaEsperada =
     `Acessibilidade componente ${componente}`;
 
   const artigoTabNews =
-    await buscarArtigoAleatorioTabNews(logger);
+    await buscarArtigoAleatorioTabNews(
+      logger
+    );
 
   const respostaComArtigo =
     `${respostaEsperada} + ${artigoTabNews.trecho}`;
@@ -212,74 +367,98 @@ async function enviarComponente(componente, logger = console.error) {
   };
 
   /**
+   * ==========================================================
    * POST
+   * ==========================================================
    *
    * Simula o envio do componente para uma API.
    */
+
   const postEndpoint =
     'https://postman-echo.com/post';
 
   logger(
-    `[Componente:${componente}] POST ${postEndpoint}`
+    `[Componente:${componente}] ` +
+      `POST ${postEndpoint}`
   );
 
-  const postResponse = await fetch(postEndpoint, {
-    method: 'POST',
+  const postResponse =
+    await fetch(postEndpoint, {
+      method: 'POST',
 
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+      headers: {
+        'Content-Type':
+          'application/json',
 
-    body: JSON.stringify(body),
-  });
+        Accept:
+          'application/json',
+      },
+
+      body:
+        JSON.stringify(body),
+    });
 
   if (!postResponse.ok) {
     throw new Error(
       `Falha ao enviar componente ${componente}: ` +
-      `${postResponse.status} ${postResponse.statusText}`
+        `${postResponse.status} ` +
+        `${postResponse.statusText}`
     );
   }
 
   logger(
-    `[Componente:${componente}] POST respondeu: ` +
-      `${postResponse.status} ${postResponse.statusText}`
+    `[Componente:${componente}] ` +
+      `POST respondeu: ` +
+      `${postResponse.status} ` +
+      `${postResponse.statusText}`
   );
 
   /**
+   * ==========================================================
    * GET
+   * ==========================================================
    *
    * Simula a recuperação do resultado.
    */
+
   const getEndpoint =
     `https://postman-echo.com/get?resposta=` +
-    encodeURIComponent(respostaComArtigo);
+    encodeURIComponent(
+      respostaComArtigo
+    );
 
   logger(
-    `[Componente:${componente}] GET ${getEndpoint}`
+    `[Componente:${componente}] ` +
+      `GET ${getEndpoint}`
   );
 
-  const getResponse = await fetch(getEndpoint, {
-    method: 'GET',
+  const getResponse =
+    await fetch(getEndpoint, {
+      method: 'GET',
 
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+      headers: {
+        Accept:
+          'application/json',
+      },
+    });
 
   if (!getResponse.ok) {
     throw new Error(
       `Falha ao capturar componente ${componente}: ` +
-      `${getResponse.status} ${getResponse.statusText}`
+        `${getResponse.status} ` +
+        `${getResponse.statusText}`
     );
   }
 
   logger(
-    `[Componente:${componente}] GET respondeu: ` +
-      `${getResponse.status} ${getResponse.statusText}`
+    `[Componente:${componente}] ` +
+      `GET respondeu: ` +
+      `${getResponse.status} ` +
+      `${getResponse.statusText}`
   );
 
-  const data = await getResponse.json();
+  const data =
+    await getResponse.json();
 
   const respostaCapturada =
     data.args?.resposta;
@@ -287,30 +466,88 @@ async function enviarComponente(componente, logger = console.error) {
   if (!respostaCapturada) {
     throw new Error(
       'Falha ao capturar componente: ' +
-      'campo args.resposta ausente na resposta da API.'
+        'campo args.resposta ausente na resposta da API.'
     );
   }
 
   return {
     componente,
+
     postEndpoint,
+
     getEndpoint,
-    bodyEnviado: body,
+
+    bodyEnviado:
+      body,
+
     artigoTabNews,
+
     respostaCapturada,
   };
 }
 
 /**
+ * ============================================================
+ * MONTAGEM DOS RESULTADOS
+ * ============================================================
+ */
+
+/**
  * Monta o prompt final utilizando o resultado
  * de todos os componentes.
  */
-function montarPromptPronto(resultados) {
-  const conteudo = resultados
-    .map((resultado) => resultado.respostaCapturada)
-    .join('\n');
+function montarPromptPronto(
+  resultados
+) {
+  const conteudo =
+    resultados
+      .map(
+        (resultado) =>
+          resultado.respostaCapturada
+      )
+      .join('\n');
 
   return `PROMPT PRONTO = ${conteudo}`;
+}
+
+/**
+ * Monta os resultados no formato estruturado
+ * esperado pela Tool A.
+ */
+function montarResultadosEstruturados(
+  resultados
+) {
+  return resultados.map(
+    (resultado) => ({
+      TITULO:
+        `Acessibilidade componente ${resultado.componente}`,
+
+      CONTENT:
+        resultado.artigoTabNews.trecho,
+    })
+  );
+}
+
+/**
+ * Monta a representação FINAL da resposta.
+ *
+ * IMPORTANTE:
+ *
+ * A LLM não deve montar o layout.
+ *
+ * Essa função é responsável por definir exatamente
+ * como a resposta deve ser apresentada.
+ */
+function montarResultadosMarkdown(
+  resultados
+) {
+  return resultados
+    .map(
+      (resultado) =>
+        `## ${resultado.artigoTabNews.titulo}\n\n` +
+        `${resultado.artigoTabNews.trecho}`
+    )
+    .join('\n\n');
 }
 
 /**
@@ -333,27 +570,31 @@ function montarPromptPronto(resultados) {
  *
  * listar componentes
  *       ↓
- * enviar header
- * enviar body
- * enviar html
- * enviar css
+ * processar componentes
  *       ↓
  * capturar resultados
  *       ↓
- * montar promptPronto
+ * gerar contrato estruturado
+ *       ↓
+ * gerar display final
  */
 async function processarFluxoComponentes(
   componentesInput
 ) {
   let componentes;
-  const logs = [];
-  const logger = (message) => {
-    const line =
-      `[${new Date().toISOString()}] ${message}`;
 
-    logs.push(line);
-    console.error(line);
-  };
+  const logs = [];
+
+  const logger =
+    (message) => {
+      const line =
+        `[${new Date().toISOString()}] ` +
+        `${message}`;
+
+      logs.push(line);
+
+      console.error(line);
+    };
 
   /**
    * Permite reutilizar a função passando componentes
@@ -363,51 +604,87 @@ async function processarFluxoComponentes(
     Array.isArray(componentesInput) &&
     componentesInput.length > 0
   ) {
-    componentes = componentesInput.map(
-      (item) =>
-        typeof item === 'string'
-          ? item
-          : item.componente
-    );
+    componentes =
+      componentesInput.map(
+        (item) =>
+          typeof item === 'string'
+            ? item
+            : item.componente
+      );
   } else {
-    componentes = await listarComponentes();
+    componentes =
+      await listarComponentes();
   }
 
   logger(
-    `Componentes identificados: ${componentes.join(', ')}`
+    `Componentes identificados: ` +
+      `${componentes.join(', ')}`
   );
 
   /**
    * Executa as chamadas em paralelo.
    */
-  const resultados = await Promise.all(
-    componentes.map(async (componente) => {
-      logger(
-        `Processando componente: ${componente}`
-      );
+  const resultados =
+    await Promise.all(
+      componentes.map(
+        async (componente) => {
+          logger(
+            `Processando componente: ` +
+              `${componente}`
+          );
 
-      const resultado =
-        await enviarComponente(componente, logger);
+          const resultado =
+            await enviarComponente(
+              componente,
+              logger
+            );
 
-      logger(
-        `Componente processado: ${componente}`
-      );
+          logger(
+            `Componente processado: ` +
+              `${componente}`
+          );
 
-      return resultado;
-    })
-  );
+          return resultado;
+        }
+      )
+    );
 
   /**
-   * Somente depois que TODOS os componentes
-   * terminarem o prompt final é criado.
+   * O prompt só é criado após todos os
+   * componentes terminarem.
    */
   const promptPronto =
-    montarPromptPronto(resultados);
+    montarPromptPronto(
+      resultados
+    );
+
+  /**
+   * Dados estruturados.
+   */
+  const resultadosEstruturados =
+    montarResultadosEstruturados(
+      resultados
+    );
+
+  /**
+   * Display pronto para usuário.
+   */
+  const resultadosMarkdown =
+    montarResultadosMarkdown(
+      resultados
+    );
 
   return {
     componentes,
+
     resultados,
+
+    resultadosEstruturados,
+
+    resultadosMarkdown,
+
     promptPronto,
+
     logs,
   };
 }
@@ -418,166 +695,395 @@ async function processarFluxoComponentes(
  * ============================================================
  */
 
-const handle = serveStdio(() => {
-  const server = new McpServer({
-    name: 'servidor-saudacao',
-    title: 'Servidor de Saudacao',
-    version: '1.3.0',
+const handle =
+  serveStdio(() => {
+    const server =
+      new McpServer({
+        name:
+          'servidor-saudacao',
 
-    description:
-      'Servidor MCP com fluxo automatico de processamento de componentes.',
-  });
+        title:
+          'Servidor de Saudacao',
 
-  /**
-   * ==========================================================
-   * TOOL - TABNEWS
-   * ==========================================================
-   */
+        version:
+          '2.0.0',
 
-  server.registerTool(
-    'artigos_tabnews',
+        description:
+          'Servidor MCP com fluxo automatico de processamento ' +
+          'de componentes e resposta padronizada.',
+      });
 
-    {
-      title: 'Artigos do TabNews',
+    /**
+     * ========================================================
+     * TOOL - TABNEWS
+     * ========================================================
+     */
 
-      description:
-        'Consulta os conteudos recentes do TabNews e retorna o titulo e a URL de cada artigo.',
+    server.registerTool(
+      'artigos_tabnews',
 
-      inputSchema: z.object({
-        limite: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
-          .default(10)
-          .describe(
-            'Quantidade maxima de artigos a retornar.'
-          ),
-      }),
+      {
+        title:
+          'Artigos do TabNews',
 
-      outputSchema: z.object({
-        artigos: z.array(
+        description:
+          'Consulta os conteudos recentes do TabNews ' +
+          'e retorna o titulo e a URL de cada artigo.',
+
+        inputSchema:
           z.object({
-            titulo: z.string(),
-            url: z.string().url(),
-          })
-        ),
-      }),
+            limite:
+              z
+                .number()
+                .int()
+                .min(1)
+                .max(100)
+                .default(10)
+                .describe(
+                  'Quantidade maxima de artigos a retornar.'
+                ),
+          }),
 
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-    },
+        outputSchema:
+          z.object({
+            artigos:
+              z.array(
+                z.object({
+                  titulo:
+                    z.string(),
 
-    async ({ limite }) => {
-      const response = await fetch(
-        'https://www.tabnews.com.br/api/v1/contents'
-      );
+                  url:
+                    z
+                      .string()
+                      .url(),
+                })
+              ),
+          }),
 
-      if (!response.ok) {
-        throw new Error(
-          `Falha ao consultar TabNews: ` +
-          `${response.status} ${response.statusText}`
-        );
-      }
+        annotations: {
+          readOnlyHint:
+            true,
 
-      const contents = await response.json();
+          destructiveHint:
+            false,
 
-      const artigos = contents
-        .slice(0, limite)
-        .map((content) => ({
-          titulo: content.title,
-          url: articleUrl(content),
-        }));
+          idempotentHint:
+            false,
 
-      return {
-        content: [
-          {
-            type: 'text',
-
-            text: artigos
-              .map(
-                (artigo) =>
-                  `${artigo.titulo} - ${artigo.url}`
-              )
-              .join('\n'),
-          },
-        ],
-
-        structuredContent: {
-          artigos,
+          openWorldHint:
+            true,
         },
-      };
-    }
-  );
+      },
 
-  /**
-   * ==========================================================
-   * TOOL A - FLUXO AUTOMÁTICO
-   * ==========================================================
-   *
-   * Esta é a principal mudança.
-   *
-   * Antes:
-   *
-   * tool_a_componentes
-   *        ↓
-   * retorna instrução para LLM
-   *        ↓
-   * LLM decide se chama processar_componentes
-   *
-   *
-   * Agora:
-   *
-   * tool_a_componentes
-   *        ↓
-   * listarComponentes()
-   *        ↓
-   * processarFluxoComponentes()
-   *        ↓
-   * enviarComponente()
-   *        ↓
-   * montarPromptPronto()
-   *        ↓
-   * promptPronto
-   *
-   * Não existe mais uma decisão intermediária do LLM.
-   */
+      async ({
+        limite,
+      }) => {
+        const response =
+          await fetch(
+            'https://www.tabnews.com.br/api/v1/contents'
+          );
 
-  server.registerTool(
-    'tool_a_componentes',
+        if (!response.ok) {
+          throw new Error(
+            `Falha ao consultar TabNews: ` +
+              `${response.status} ` +
+              `${response.statusText}`
+          );
+        }
 
-    {
-      title:
-        'Tool A - Processar Componentes',
+        const contents =
+          await response.json();
 
-      description:
-        'Identifica os componentes, processa automaticamente cada componente e retorna o promptPronto final. O fluxo completo ocorre dentro desta chamada.',
+        const artigos =
+          contents
+            .slice(
+              0,
+              limite
+            )
+            .map(
+              (content) => ({
+                titulo:
+                  content.title,
 
-      inputSchema: z.object({}),
+                url:
+                  articleUrl(
+                    content
+                  ),
+              })
+            );
 
-      outputSchema: z.object({
-        componentes: z.array(
-          z.string()
-        ),
-        logs: z.array(
-          z.string()
-        ),
+        return {
+          content: [
+            {
+              type:
+                'text',
 
-        promptPronto: z.string(),
+              text:
+                artigos
+                  .map(
+                    (artigo) =>
+                      `${artigo.titulo} - ${artigo.url}`
+                  )
+                  .join('\n'),
+            },
+          ],
 
-        resultados: z.array(
+          structuredContent: {
+            artigos,
+          },
+        };
+      }
+    );
+
+    /**
+     * ========================================================
+     * TOOL A - FLUXO AUTOMÁTICO
+     * ========================================================
+     *
+     * Essa é a tool principal.
+     *
+     * A execução é feita integralmente dentro do MCP.
+     *
+     * A LLM NÃO precisa:
+     *
+     * - chamar outra tool;
+     * - decidir sequência;
+     * - montar o relatório;
+     * - criar Markdown;
+     * - interpretar o contrato para gerar layout.
+     *
+     * A Tool A retorna:
+     *
+     * data
+     *   → estrutura canônica
+     *
+     * display
+     *   → resposta final para usuário
+     */
+
+    server.registerTool(
+      'tool_a_componentes',
+
+      {
+        title:
+          'Tool A - Processar Componentes',
+
+        /**
+         * A descrição da tool também funciona como
+         * orientação para o modelo.
+         *
+         * Ela NÃO é garantia absoluta de renderização,
+         * porque o host continua tendo controle sobre
+         * a resposta final.
+         */
+        description: [
+          'Executa o fluxo completo de componentes e retorna o resultado final.',
+
+          '',
+
+          'INSTRUCAO DE APRESENTACAO OBRIGATORIA PARA O HOST/LLM:',
+
+          '- O campo structuredContent.display contem a resposta final pronta para o usuario.',
+
+          '- Ao apresentar o resultado, reproduza o valor de display integralmente.',
+
+          '- Nao resuma o conteudo.',
+
+          '- Nao reescreva o conteudo.',
+
+          '- Nao reorganize o conteudo.',
+
+          '- Nao renomeie secoes ou campos.',
+
+          '- Nao omita nenhuma parte de display.',
+
+          '- Nao acrescente introducao antes da resposta.',
+
+          '- Nao acrescente conclusao depois da resposta.',
+
+          '- Nao acrescente observacoes ou comentarios adicionais.',
+
+          '- O campo data existe para consumo estruturado.',
+
+          '- Nao utilize data para reconstruir a apresentacao visual.',
+
+          '- Para resposta ao usuario, utilize display como fonte primaria.',
+
+          '',
+
+          'IMPORTANTE:',
+
+          'O protocolo MCP fornece o contrato e as instrucoes, mas o host MCP possui a decisao final de renderizacao.',
+        ].join('\n'),
+
+        inputSchema:
+          z
+            .object({})
+            .strict(),
+
+        /**
+         * Agora a Tool A possui um contrato explícito.
+         */
+        outputSchema:
+          toolAComponentesOutputSchema,
+
+        annotations: {
+          readOnlyHint:
+            false,
+
+          destructiveHint:
+            false,
+
+          idempotentHint:
+            true,
+
+          openWorldHint:
+            true,
+        },
+      },
+
+      async () => {
+        console.error(
+          'Iniciando fluxo automatico de componentes...'
+        );
+
+        /**
+         * Uma única chamada executa todo o fluxo.
+         */
+        const {
+          componentes,
+
+          resultadosEstruturados,
+
+          resultadosMarkdown,
+        } =
+          await processarFluxoComponentes();
+
+        console.error(
+          'Fluxo de componentes concluido.'
+        );
+
+        /**
+         * ====================================================
+         * CONTRATO FINAL
+         * ====================================================
+         *
+         * data
+         *   Conteúdo estruturado para máquina.
+         *
+         * display
+         *   Conteúdo final para apresentação.
+         */
+
+        const resposta =
+          toolAComponentesOutputSchema.parse({
+            tipo:
+              'tool_a_componentes_resultado',
+
+            versaoTemplate:
+              '2.0',
+
+            status:
+              'sucesso',
+
+            data: {
+              componentes,
+
+              resultados:
+                resultadosEstruturados,
+            },
+
+            display:
+              resultadosMarkdown,
+          });
+
+        /**
+         * ====================================================
+         * RETORNO MCP
+         * ====================================================
+         *
+         * content:
+         *
+         * Compatibilidade com hosts que trabalham
+         * principalmente com conteúdo textual.
+         *
+         * Importante:
+         *
+         * O content já recebe APENAS a versão pronta.
+         *
+         * Não retornamos o JSON serializado aqui porque isso
+         * incentivaria a LLM a interpretar/reformatar o contrato.
+         *
+         *
+         * structuredContent:
+         *
+         * Contrato canônico completo.
+         */
+
+        return {
+          content: [
+            {
+              type:
+                'text',
+
+              text:
+                resposta.display,
+            },
+          ],
+
+          structuredContent:
+            resposta,
+        };
+      }
+    );
+
+    /**
+     * ========================================================
+     * TOOL B - PROCESSAMENTO INDIVIDUAL
+     * ========================================================
+     *
+     * Mantida para testes/processamento manual.
+     *
+     * A Tool A NÃO depende dela.
+     */
+
+    server.registerTool(
+      'tool_b_enviar_componente',
+
+      {
+        title:
+          'Tool B - Enviar Componente',
+
+        description:
+          'Processa manualmente um unico componente. ' +
+          'Esta tool nao e necessaria para o fluxo automatico da Tool A.',
+
+        inputSchema:
           z.object({
-            componente: z.string(),
+            componente:
+              z
+                .string()
+                .trim()
+                .min(1)
+                .describe(
+                  'Nome do componente que deve ser processado.'
+                ),
+          }),
+
+        outputSchema:
+          z.object({
+            componente:
+              z.string(),
 
             postEndpoint:
-              z.string().url(),
+              z
+                .string()
+                .url(),
 
             getEndpoint:
-              z.string().url(),
+              z
+                .string()
+                .url(),
 
             bodyEnviado:
               z.object({
@@ -590,277 +1096,169 @@ const handle = serveStdio(() => {
 
             respostaCapturada:
               z.string(),
-          })
-        ),
-      }),
-
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-    },
-
-    async () => {
-      console.error(
-        'Iniciando fluxo automatico de componentes...'
-      );
-
-      /**
-       * Uma única chamada executa tudo.
-       */
-      const {
-        componentes,
-        resultados,
-        promptPronto,
-        logs,
-      } =
-        await processarFluxoComponentes();
-
-      console.error(
-        'Fluxo de componentes concluido.'
-      );
-
-      /**
-       * A resposta da Tool A já é FINAL.
-       *
-       * Não existe:
-       *
-       * proximaTool
-       * instrucaoContinuacao
-       * fluxoCompletoTool
-       * rascunhoPromptNaoFinal
-       *
-       * Portanto, o host não precisa tomar
-       * nenhuma decisão intermediária.
-       */
-      return {
-        content: [
-          {
-            type: 'text',
-            text: promptPronto,
-          },
-        ],
-
-        structuredContent: {
-          componentes,
-          logs,
-          promptPronto,
-          resultados,
-        },
-      };
-    }
-  );
-
-  /**
-   * ==========================================================
-   * TOOL B - PROCESSAMENTO INDIVIDUAL
-   * ==========================================================
-   *
-   * Mantida caso seja necessário testar/processar
-   * apenas um componente manualmente.
-   *
-   * A Tool A NÃO depende dela.
-   */
-
-  server.registerTool(
-    'tool_b_enviar_componente',
-
-    {
-      title:
-        'Tool B - Enviar Componente',
-
-      description:
-        'Processa manualmente um unico componente. Esta tool nao e necessaria para o fluxo automatico da Tool A.',
-
-      inputSchema: z.object({
-        componente: z
-          .string()
-          .trim()
-          .min(1)
-          .describe(
-            'Nome do componente que deve ser processado.'
-          ),
-      }),
-
-      outputSchema: z.object({
-        componente:
-          z.string(),
-
-        postEndpoint:
-          z.string().url(),
-
-        getEndpoint:
-          z.string().url(),
-
-        bodyEnviado:
-          z.object({
-            componente:
-              z.string(),
           }),
 
-        artigoTabNews:
-          artigoTabNewsOutputSchema,
+        annotations: {
+          readOnlyHint:
+            false,
 
-        respostaCapturada:
-          z.string(),
-      }),
+          destructiveHint:
+            false,
 
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
+          idempotentHint:
+            true,
+
+          openWorldHint:
+            true,
+        },
       },
-    },
 
-    async ({ componente }) => {
-      console.error(
-        `Processando componente individual: ${componente}`
-      );
-
-      const resultado =
-        await enviarComponente(componente);
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              resultado.respostaCapturada,
-          },
-        ],
-
-        structuredContent:
-          resultado,
-      };
-    }
-  );
-
-  /**
-   * ==========================================================
-   * TOOL PROCESSAR COMPONENTES
-   * ==========================================================
-   *
-   * Mantida como endpoint MCP independente para
-   * testes ou chamadas explícitas.
-   *
-   * IMPORTANTE:
-   *
-   * tool_a_componentes NÃO precisa chamar esta tool.
-   *
-   * Ambas reutilizam a mesma função interna:
-   *
-   * processarFluxoComponentes()
-   */
-
-  server.registerTool(
-    'processar_componentes',
-
-    {
-      title:
-        'Processar Componentes',
-
-      description:
-        'Executa explicitamente o processamento de uma lista de componentes e retorna o promptPronto.',
-
-      inputSchema: z.object({
-        componentes: z
-          .array(
-            z.object({
-              componente: z
-                .string()
-                .trim()
-                .min(1),
-            })
-          )
-          .optional()
-          .describe(
-            'Lista opcional de componentes. Quando omitida, utiliza a lista padrao.'
-          ),
-      }),
-
-      outputSchema: z.object({
-        promptPronto:
-          z.string(),
-
-        logs:
-          z.array(
-            z.string()
-          ),
-
-        resultados:
-          z.array(
-            z.object({
-              componente:
-                z.string(),
-
-              postEndpoint:
-                z.string().url(),
-
-              getEndpoint:
-                z.string().url(),
-
-              bodyEnviado:
-                z.object({
-                  componente:
-                    z.string(),
-                }),
-
-              artigoTabNews:
-                artigoTabNewsOutputSchema,
-
-              respostaCapturada:
-                z.string(),
-            })
-          ),
-      }),
-
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
-    },
-
-    async ({
-      componentes:
-        componentesInput,
-    }) => {
-      console.error(
-        'Executando processar_componentes...'
-      );
-
-      const {
-        resultados,
-        promptPronto,
-        logs,
-      } =
-        await processarFluxoComponentes(
-          componentesInput
+      async ({
+        componente,
+      }) => {
+        console.error(
+          `Processando componente individual: ` +
+            `${componente}`
         );
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: promptPronto,
-          },
-        ],
+        const resultado =
+          await enviarComponente(
+            componente
+          );
 
-        structuredContent: {
-          logs,
-          promptPronto,
-          resultados,
+        return {
+          content: [
+            {
+              type:
+                'text',
+
+              text:
+                resultado.respostaCapturada,
+            },
+          ],
+
+          structuredContent:
+            resultado,
+        };
+      }
+    );
+
+    /**
+     * ========================================================
+     * TOOL PROCESSAR COMPONENTES
+     * ========================================================
+     *
+     * Mantida como endpoint MCP independente.
+     *
+     * Pode ser usada para testes ou chamadas explícitas.
+     *
+     * A Tool A NÃO chama esta tool.
+     *
+     * Ambas reutilizam a função interna:
+     *
+     * processarFluxoComponentes()
+     */
+
+    server.registerTool(
+      'processar_componentes',
+
+      {
+        title:
+          'Processar Componentes',
+
+        description:
+          'Executa explicitamente o processamento de uma lista ' +
+          'de componentes e retorna o promptPronto.',
+
+        inputSchema:
+          z.object({
+            componentes:
+              z
+                .array(
+                  z.object({
+                    componente:
+                      z
+                        .string()
+                        .trim()
+                        .min(1),
+                  })
+                )
+                .optional()
+                .describe(
+                  'Lista opcional de componentes. ' +
+                  'Quando omitida, utiliza a lista padrao.'
+                ),
+          }),
+
+        outputSchema:
+          processarComponentesOutputSchema,
+
+        annotations: {
+          readOnlyHint:
+            false,
+
+          destructiveHint:
+            false,
+
+          idempotentHint:
+            true,
+
+          openWorldHint:
+            true,
         },
-      };
-    }
-  );
+      },
 
-  return server;
-});
+      async ({
+        componentes:
+          componentesInput,
+      }) => {
+        console.error(
+          'Executando processar_componentes...'
+        );
+
+        const {
+          resultados,
+
+          promptPronto,
+
+          logs,
+        } =
+          await processarFluxoComponentes(
+            componentesInput
+          );
+
+        const resposta =
+          processarComponentesOutputSchema.parse({
+            logs,
+
+            promptPronto,
+
+            resultados,
+          });
+
+        return {
+          content: [
+            {
+              type:
+                'text',
+
+              text:
+                JSON.stringify(
+                  resposta,
+                  null,
+                  2
+                ),
+            },
+          ],
+
+          structuredContent:
+            resposta,
+        };
+      }
+    );
+
+    return server;
+  });
 
 /**
  * ============================================================
@@ -868,13 +1266,17 @@ const handle = serveStdio(() => {
  * ============================================================
  */
 
-process.on('SIGINT', () => {
-  void handle
-    .close()
-    .then(() =>
-      process.exit(0)
-    );
-});
+process.on(
+  'SIGINT',
+  () => {
+    void handle
+      .close()
+      .then(
+        () =>
+          process.exit(0)
+      );
+  }
+);
 
 console.error(
   'Servidor MCP ouvindo via stdio.'
